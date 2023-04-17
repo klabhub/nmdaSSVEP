@@ -12,7 +12,14 @@ This script combines data, screens those data for quality(/inclusion),
 % Rutgers University - Newark 
 
 %1. combine lfp recordings and edf files (~15 minutes)
-    combineFiles
+    %make sure that data folders with lfp and eye data exist
+    sourceFolder = strrep(pwd,'code','data\');
+    if ~exist(sourceFolder,'dir')
+        mkdir(sourceFolder);
+        error('Please add LFP and EYE data from data repository')
+    end 
+    
+    combineFiles    %combine data for further analyses
 
 %2. screen files for blinks and artifacts and determine whether files
 %   should be included in further analyses (~5 minutes)
