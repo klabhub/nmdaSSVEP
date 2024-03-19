@@ -1,4 +1,4 @@
-function varargout = doStats(inputTable,modelNotation,modelName)
+function varargout = doStats(inputTable,modelNotation,modelName,outlierDetectionType)
 % This function uses linear mixed effects models and simple outlier 
 % detection to compare SSVEP strength between injections of Saline and 
 % Ketamine
@@ -10,29 +10,65 @@ function varargout = doStats(inputTable,modelNotation,modelName)
 % Rutgers University - Newark
 
    
-    lmeModel = fitlme(inputTable,modelNotation);
+    if nargin==4
 
-    residualsModel = residuals(lmeModel);
-    outliers =isoutlier(residualsModel);
-    
-    outlierIdx = find(outliers);
-    salineOutliers = outlierIdx(outlierIdx<=numel(outliers)/2);
-    ketamineOutliers = outlierIdx(outlierIdx>numel(outliers)/2);
-    
-    outliers = unique([salineOutliers' (ketamineOutliers-numel(outliers)/2)' ketamineOutliers' (salineOutliers+numel(outliers)/2)']);
-    
-    inputTable(outliers,:) = [];
+        lmeModel = fitlme(inputTable,modelNotation,'DummyVarCoding','effects');
+        residualsModel = residuals(lmeModel);
+        outliers =isoutlier(residualsModel);
+        outlierIdx = find(outliers);
 
-    lmeModel = fitlme(inputTable,modelNotation);
-    [robustnessTest, ~, ~] = lm.bootstrap(lmeModel,'subjectVariable','observationNr','mode','FITPLUSNOISE','nrHeteroBins',3,'graph',false,'nrMonteCarlo',1000);
-    robustnessTest = robustnessTest.significanceMatch;
+        if outlierDetectionType==1
+
+            inputTable(outliers,:) = [];
+
+        else
+
+            %if an electrode is an outlier, then the same electrode should be
+            %excluded in the same session and condition but for the other drug
+            counterPart = nan(1,numel(outlierIdx));
+            for outlierCntr = 1:numel(outlierIdx)
+    
+                tempSubject = inputTable.subject(outlierIdx(outlierCntr));
+                tempSession = inputTable.session(outlierIdx(outlierCntr));
+                tempDrug = inputTable.drug(outlierIdx(outlierCntr));
+                tempCondition = inputTable.condition(outlierIdx(outlierCntr));
+                tempElectrode = inputTable.electrode(outlierIdx(outlierCntr));
+    
+                if tempDrug=='2'
+    
+                    counterPart(outlierCntr) = find(inputTable.subject==tempSubject & inputTable.session==tempSession & inputTable.drug=='1' & inputTable.condition==tempCondition & inputTable.electrode==tempElectrode);
+    
+                elseif tempDrug=='1'
+    
+                    counterPart(outlierCntr) = find(inputTable.subject==tempSubject & inputTable.session==tempSession & inputTable.drug=='2' & inputTable.condition==tempCondition & inputTable.electrode==tempElectrode);
+    
+                end
+            end
+            combinedOutliers = union(outlierIdx,counterPart);
+            outliers(combinedOutliers) = 1;
+            inputTable(outliers,:) = [];
+        end
+    end
+    
+    % outlierIdx = find(outliers);
+    % salineOutliers = outlierIdx(outlierIdx<=numel(outliers)/2);
+    % ketamineOutliers = outlierIdx(outlierIdx>numel(outliers)/2);
+    % 
+    % outliers = unique([salineOutliers' (ketamineOutliers-numel(outliers)/2)' ketamineOutliers' (salineOutliers+numel(outliers)/2)']);
+
+   
+
+    lmeModel = fitlme(inputTable,modelNotation,'DummyVarCoding','effects');
+    % [robustnessTest, ~, ~] = lm.bootstrap(lmeModel,'subjectVariable','observationNr','mode','FITPLUSNOISE','nrHeteroBins',3,'graph',false,'nrMonteCarlo',1000);
+    % robustnessTest = robustnessTest.significanceMatch;
 
     effectModel = lmeModel.Coefficients;
     anovaModel = lmeModel.anova;
     
    	columNames = fieldnames(effectModel);
     columNames([1 end-2:end]) = [];
-    columNames = [columNames; {'CI';'robust'}];
+    %columNames = [columNames; {'CI';'robust'}];
+    columNames = [columNames; {'CI'}];
     if isempty(modelName)
         modelName = 'lmeModel';
         modelNameAnova = 'anovaModel';
@@ -92,18 +128,34 @@ function varargout = doStats(inputTable,modelNotation,modelName)
     varargout{3} = cat(1,interceptText,modelText);
     
     if nargout>3
-        conditionNames = ['5Hz  -- '; '10Hz -- '; '20Hz -- ';'40Hz -- '];
-        tempContrastText = cell(numel(unique(lmeModel.Variables.condition)),1);
-        for conditionCntr = 1:numel(unique(lmeModel.Variables.condition))
-            [p,stat,df,delta,CI,str,~,~] = lm.posthoc(lmeModel,{'condition',num2str(conditionCntr+1),'drug','2'},{'condition',num2str(conditionCntr+1),'drug','1'});
-            tempContrastTable.condition{conditionCntr,1} = conditionNames(conditionCntr,:);
-            tempContrastTable.fValue(conditionCntr,1) = stat;
-            tempContrastTable.df(conditionCntr,1) = df;
-            tempContrastTable.delta(conditionCntr,1) = delta;
-            tempContrastTable.CI(conditionCntr,:) = CI;
-            tempContrastTable.pValue(conditionCntr,:) = p;
-
-            tempContrastText{conditionCntr} = str;
+        if numel(unique(lmeModel.Variables.condition))==4
+            conditionNames = ['5Hz  -- '; '10Hz -- '; '20Hz -- ';'40Hz -- '];
+            tempContrastText = cell(numel(unique(lmeModel.Variables.condition)),1);
+            for conditionCntr = 1:numel(unique(lmeModel.Variables.condition))
+                [p,stat,df,delta,CI,str,~,~] = lm.posthoc(lmeModel,{'condition',num2str(conditionCntr+1),'drug','2'},{'condition',num2str(conditionCntr+1),'drug','1'});
+                tempContrastTable.condition{conditionCntr,1} = conditionNames(conditionCntr,:);
+                tempContrastTable.fValue(conditionCntr,1) = stat;
+                tempContrastTable.df(conditionCntr,1) = df;
+                tempContrastTable.delta(conditionCntr,1) = delta;
+                tempContrastTable.CI(conditionCntr,:) = CI;
+                tempContrastTable.pValue(conditionCntr,:) = p;
+    
+                tempContrastText{conditionCntr} = str;
+            end
+        elseif numel(unique(lmeModel.Variables.condition))==5
+            conditionNames = ['delta -- '; 'theta -- '; 'alpha -- ';'beta  -- ' ;'gamma -- '];
+            tempContrastText = cell(numel(unique(lmeModel.Variables.condition)),1);
+            for conditionCntr = 1:numel(unique(lmeModel.Variables.condition))
+                [p,stat,df,delta,CI,str,~,~] = lm.posthoc(lmeModel,{'condition',num2str(conditionCntr),'drug','2'},{'condition',num2str(conditionCntr),'drug','1'});
+                tempContrastTable.condition{conditionCntr,1} = conditionNames(conditionCntr,:);
+                tempContrastTable.fValue(conditionCntr,1) = stat;
+                tempContrastTable.df(conditionCntr,1) = df;
+                tempContrastTable.delta(conditionCntr,1) = delta;
+                tempContrastTable.CI(conditionCntr,:) = CI;
+                tempContrastTable.pValue(conditionCntr,:) = p;
+    
+                tempContrastText{conditionCntr} = str;
+            end
         end
         varargout{4} = struct2table(tempContrastTable);
     end

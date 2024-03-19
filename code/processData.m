@@ -1,19 +1,21 @@
-function processData
 % This script performs frequency analysis, generates spectra and calculates
 % measures of eye movements (data for figure 4)
 %
 % Companion code for:
 %
 % N-methyl d-aspartate receptor hypofunction reduces steady state visual
-% evoked potentials (2023)
+% evoked potentials (2024)
+% Alexander Schielke & Bart Krekelberg
+% Center for Molecular and Behavioral Neuroscience
+% Rutgers University - Newark 
 
 %where are data located and where should results be saved
 sourceFolder = strrep(pwd,'code','data\');
 dataFolder = [sourceFolder 'combined\'];
 targetFolder = [sourceFolder 'processed\'];
 
-%does the outputFolder exist 
-%(this should be the case for anybody the data are shared with)
+%do the outputFolders exist 
+%(this should be the case once the code has been run a least once)
 if ~exist(targetFolder,'dir')
     mkdir(targetFolder);
 end 
@@ -35,7 +37,7 @@ time = -800:2600;   %trial aligned to stimulus onset
 
 maxSamplePoints = max(2.^nextpow2(sum(time>=501 & time<=1500)));
 signalLength = sum(time>=501 & time<=1500);  %use center 1000 ms of stimulus presentation
-frequency = maxSamplePoints /(signalLength/1000)*(0:(maxSamplePoints/2))/maxSamplePoints; %frequency vector
+frequency = maxSamplePoints /(signalLength/1000)*(0:(maxSamplePoints/2))/maxSamplePoints;
 frequency(frequency>maxSamplePoints/2) = [];
 
 
@@ -43,7 +45,6 @@ frequency(frequency>maxSamplePoints/2) = [];
 catchCntr = 0;
 totalElectrodeCntr = 0;
 for fileCntr = 1:length(dataFiles)
-    
     %load data
     tempFile = load([dataFolder dataFiles{fileCntr}]);
     tempFile = tempFile.data;
@@ -123,6 +124,9 @@ for fileCntr = 1:length(dataFiles)
 
                 dividedSignal.saline.induced(:,conditionCntr,totalElectrodeCntr) = tempInducedSaline;
                 dividedSignal.ketamine.induced(:,conditionCntr,totalElectrodeCntr) = tempInducedKetamine;
+                %to calculate ativity by freqeuncy band from 0Hz condition
+                dividedSignal.saline.spontaneous(:,conditionCntr,totalElectrodeCntr) = tempTotalSaline;
+                dividedSignal.ketamine.spontaneous(:,conditionCntr,totalElectrodeCntr) = tempTotalKetamine;
 
 
                 %calculate baseline for total power using the chronux toolbox
@@ -158,6 +162,8 @@ for fileCntr = 1:length(dataFiles)
                 dividedSignal.ketamine.evoked(:,conditionCntr,totalElectrodeCntr) = nanPlaceHolder;
                 dividedSignal.saline.induced(:,conditionCntr,totalElectrodeCntr) = nanPlaceHolder;
                 dividedSignal.ketamine.induced(:,conditionCntr,totalElectrodeCntr) = nanPlaceHolder;
+                dividedSignal.saline.spontaneous(:,conditionCntr,totalElectrodeCntr) = nanPlaceHolder;
+                dividedSignal.ketamine.spontaneous(:,conditionCntr,totalElectrodeCntr) = nanPlaceHolder;
 
                 nanPlaceHolder = nan(numel(mtFreq),1);
                 dividedSignal.saline.totalBaseline(:,conditionCntr,totalElectrodeCntr) = nanPlaceHolder;
@@ -182,7 +188,7 @@ for conditionCntr = 1:numel(uCond)
     for freqCntr = 1:sum(frequency<=125)
 
         % evoked power
-        permResult = permutationTest2(squeeze(dividedSignal.ketamine.evoked(freqCntr,conditionCntr,useSelection(:,conditionCntr)))*(freqCntr-1),squeeze(dividedSignal.saline.evoked(freqCntr,conditionCntr,useSelection(:,conditionCntr)))*(freqCntr-1),'groupNames',{'ketamine';'saline'},'paired',true);
+        permResult = permutationTest(squeeze(dividedSignal.ketamine.evoked(freqCntr,conditionCntr,useSelection(:,conditionCntr)))*(freqCntr-1),squeeze(dividedSignal.saline.evoked(freqCntr,conditionCntr,useSelection(:,conditionCntr)))*(freqCntr-1),'groupNames',{'ketamine';'saline'},'paired',true);
 
         splitSpectrum.evoked.condition(conditionCntr).difference.mean(freqCntr) = permResult.difference;
         splitSpectrum.evoked.condition(conditionCntr).difference.ci(freqCntr,:) = permResult.ci;
@@ -195,7 +201,7 @@ for conditionCntr = 1:numel(uCond)
 
 
         % induced power
-        permResult = permutationTest2(squeeze(dividedSignal.ketamine.induced(freqCntr,conditionCntr,useSelection(:,conditionCntr)))*(freqCntr-1),squeeze(dividedSignal.saline.induced(freqCntr,conditionCntr,useSelection(:,conditionCntr)))*(freqCntr-1),'groupNames',{'ketamine';'saline'},'paired',true);
+        permResult = permutationTest(squeeze(dividedSignal.ketamine.induced(freqCntr,conditionCntr,useSelection(:,conditionCntr)))*(freqCntr-1),squeeze(dividedSignal.saline.induced(freqCntr,conditionCntr,useSelection(:,conditionCntr)))*(freqCntr-1),'groupNames',{'ketamine';'saline'},'paired',true);
 
         splitSpectrum.induced.condition(conditionCntr).difference.mean(freqCntr) = permResult.difference;
         splitSpectrum.induced.condition(conditionCntr).difference.ci(freqCntr,:) = permResult.ci;
@@ -225,6 +231,8 @@ for fileCntr = 1:length(dataFiles)
     tempFile = load([dataFolder dataFiles{fileCntr}]);
     tempFile = tempFile.data;
     
+    uCond = unique(tempFile.lfp.trialInfo.conIdent{1});
+
    	displacementThreshold = 0.01;    %eyelink 1000 system has an accuracy of 0.01 degrees visual angle
     subject = tempFile.subject;
     
@@ -232,61 +240,70 @@ for fileCntr = 1:length(dataFiles)
     for conditionCntr = 1:numel(uCond)
         
         try
-        %which trials fit criteria (i.e., no fixtion breaks, correct condition
-        %and initiated within 60 minutes after injection)
-        useTrialsSaline = tempFile.eye.trialInfo.useTrials{1} & tempFile.eye.trialInfo.realTime{1}<=60 & tempFile.eye.trialInfo.conIdent{1}==uCond(conditionCntr);
-        useTrialsKetamine = tempFile.eye.trialInfo.useTrials{2} & tempFile.eye.trialInfo.realTime{2}<=60 & tempFile.eye.trialInfo.conIdent{2}==uCond(conditionCntr);
-        
-
-        if sum(isnan(tempFile.eye.signal{1}(time>500 & time<=1500,find(useTrialsSaline,1),1)))==0
-            xCoordinatesSaline = tempFile.eye.signal{1}(time>500 & time<=1500,useTrialsSaline,1);
-            yCoordinatesSaline = tempFile.eye.signal{1}(time>500 & time<=1500,useTrialsSaline,2);
-            xCoordinatesKetamine = tempFile.eye.signal{2}(time>500 & time<=1500,useTrialsKetamine,1);
-            yCoordinatesKetamine = tempFile.eye.signal{2}(time>500 & time<=1500,useTrialsKetamine,2);
-        else
-           	xCoordinatesSaline = tempFile.eye.signal{1}(time>500 & time<=1500,useTrialsSaline,4);
-            yCoordinatesSaline = tempFile.eye.signal{1}(time>500 & time<=1500,useTrialsSaline,5);
-            xCoordinatesKetamine = tempFile.eye.signal{2}(time>500 & time<=1500,useTrialsKetamine,4);
-            yCoordinatesKetamine = tempFile.eye.signal{2}(time>500 & time<=1500,useTrialsKetamine,5);
-        end
-        
-
-        distanceFromFixSaline  = mean(sqrt(xCoordinatesSaline.^2 + yCoordinatesSaline.^2));
-        distanceFromFixKetamine  = mean(sqrt(xCoordinatesKetamine.^2 + yCoordinatesKetamine.^2));
-        
-        distanceTraveledSaline  = abs(diff(sqrt(xCoordinatesSaline.^2 + yCoordinatesSaline.^2)));
-        distanceTraveledSaline(distanceTraveledSaline<displacementThreshold) = 0;
-        distanceTraveledSaline = sum(distanceTraveledSaline);
-        
-        distanceTraveledKetamine  = abs(diff(sqrt(xCoordinatesKetamine.^2 + yCoordinatesKetamine.^2)));
-        distanceTraveledKetamine(distanceTraveledKetamine<displacementThreshold) = 0;
-        distanceTraveledKetamine = sum(distanceTraveledKetamine);
-        
-        eyeDataPerTrial(fileCntr).subject = subject;
-        eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).saline = distanceFromFixSaline;
-        eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).ketamine = distanceFromFixKetamine;
-        eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).saline = distanceTraveledSaline;
-        eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).ketamine = distanceTraveledKetamine;
-        
-        %put data in same format as magnitude measures for evoked, induced
-        %and baseline activity
-        eyeData.fixInaccuracy.saline(electrodeStartNr:electrodeStopNr,conditionCntr) = mean(eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).saline);
-        eyeData.fixInaccuracy.ketamine(electrodeStartNr:electrodeStopNr,conditionCntr) = mean(eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).ketamine);
-        eyeData.fixInstability.saline(electrodeStartNr:electrodeStopNr,conditionCntr) = mean(eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).saline);
-        eyeData.fixInstability.ketamine(electrodeStartNr:electrodeStopNr,conditionCntr) = mean(eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).ketamine);
-        
-        catch
-            eyeDataPerTrial(fileCntr).subject = subject;
-            eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).saline = NaN;
-            eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).ketamine = NaN;
-            eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).saline = NaN;
-            eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).ketamine = NaN;
+            %which trials fit criteria (i.e., no fixtion breaks, correct condition
+            %and initiated within 60 minutes after injection)
+            useTrialsSaline = tempFile.eye.trialInfo.useTrials{1} & tempFile.eye.trialInfo.realTime{1}<=60 & tempFile.eye.trialInfo.conIdent{1}==uCond(conditionCntr);
+            useTrialsKetamine = tempFile.eye.trialInfo.useTrials{2} & tempFile.eye.trialInfo.realTime{2}<=60 & tempFile.eye.trialInfo.conIdent{2}==uCond(conditionCntr);
             
-        	eyeData.fixInaccuracy.saline(electrodeStartNr:electrodeStopNr,conditionCntr) = NaN;
+    
+            if sum(isnan(tempFile.eye.signal{1}(time>500 & time<=1500,find(useTrialsSaline,1),1)))==0
+                xCoordinatesSaline = tempFile.eye.signal{1}(time>500 & time<=1500,useTrialsSaline,1);
+                yCoordinatesSaline = tempFile.eye.signal{1}(time>500 & time<=1500,useTrialsSaline,2);
+                xCoordinatesKetamine = tempFile.eye.signal{2}(time>500 & time<=1500,useTrialsKetamine,1);
+                yCoordinatesKetamine = tempFile.eye.signal{2}(time>500 & time<=1500,useTrialsKetamine,2);
+            else
+           	    xCoordinatesSaline = tempFile.eye.signal{1}(time>500 & time<=1500,useTrialsSaline,4);
+                yCoordinatesSaline = tempFile.eye.signal{1}(time>500 & time<=1500,useTrialsSaline,5);
+                xCoordinatesKetamine = tempFile.eye.signal{2}(time>500 & time<=1500,useTrialsKetamine,4);
+                yCoordinatesKetamine = tempFile.eye.signal{2}(time>500 & time<=1500,useTrialsKetamine,5);
+            end
+            
+    
+            distanceFromFixSaline  = mean(sqrt(xCoordinatesSaline.^2 + yCoordinatesSaline.^2));
+            distanceFromFixKetamine  = mean(sqrt(xCoordinatesKetamine.^2 + yCoordinatesKetamine.^2));
+            
+            distanceTraveledSaline  = abs(diff(sqrt(xCoordinatesSaline.^2 + yCoordinatesSaline.^2)));
+            distanceTraveledSaline(distanceTraveledSaline<displacementThreshold) = 0;
+            distanceTraveledSaline = sum(distanceTraveledSaline);
+            
+            distanceTraveledKetamine  = abs(diff(sqrt(xCoordinatesKetamine.^2 + yCoordinatesKetamine.^2)));
+            distanceTraveledKetamine(distanceTraveledKetamine<displacementThreshold) = 0;
+            distanceTraveledKetamine = sum(distanceTraveledKetamine);
+            
+            eyeDataPerTrial(fileCntr).subject = subject;
+            eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).saline = distanceFromFixSaline;
+            eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).ketamine = distanceFromFixKetamine;
+            eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).saline = distanceTraveledSaline;
+            eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).ketamine = distanceTraveledKetamine;
+            
+            %put data in same format as magnitude measures for evoked, induced
+            %and baseline activity
+            eyeData.fixInaccuracy.saline(electrodeStartNr:electrodeStopNr,conditionCntr) = mean(eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).saline);
+            eyeData.fixInaccuracy.ketamine(electrodeStartNr:electrodeStopNr,conditionCntr) = mean(eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).ketamine);
+            eyeData.fixInstability.saline(electrodeStartNr:electrodeStopNr,conditionCntr) = mean(eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).saline);
+            eyeData.fixInstability.ketamine(electrodeStartNr:electrodeStopNr,conditionCntr) = mean(eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).ketamine);
+    
+            for electrodeCntr = electrodeStartNr:electrodeStopNr
+                eyeData.fixInaccuracy.perTrial.saline{electrodeCntr,conditionCntr} = eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).saline;
+                eyeData.fixInaccuracy.perTrial.ketamine{electrodeCntr,conditionCntr} = eyeDataPerTrial(fileCntr).fixInaccuracy.condition(conditionCntr).ketamine;
+                eyeData.fixInstability.perTrial.saline{electrodeCntr,conditionCntr} = eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).saline;
+                eyeData.fixInstability.perTrial.ketamine{electrodeCntr,conditionCntr} = eyeDataPerTrial(fileCntr).fixInstability.condition(conditionCntr).ketamine;
+            end
+
+        catch
+            for electrodeCntr = electrodeStartNr:electrodeStopNr
+                eyeData.fixInaccuracy.perTrial.saline{electrodeCntr,conditionCntr} = NaN;
+                eyeData.fixInaccuracy.perTrial.ketamine{electrodeCntr,conditionCntr} = NaN;
+                eyeData.fixInstability.perTrial.saline{electrodeCntr,conditionCntr} = NaN;
+                eyeData.fixInstability.perTrial.ketamine{electrodeCntr,conditionCntr} = NaN;
+            end
+
+            eyeData.fixInaccuracy.saline(electrodeStartNr:electrodeStopNr,conditionCntr) = NaN;
             eyeData.fixInaccuracy.ketamine(electrodeStartNr:electrodeStopNr,conditionCntr) = NaN;
             eyeData.fixInstability.saline(electrodeStartNr:electrodeStopNr,conditionCntr) = NaN;
             eyeData.fixInstability.ketamine(electrodeStartNr:electrodeStopNr,conditionCntr) = NaN;
         end
+         
         
     end
     electrodeStartNr = electrodeStopNr+1;
@@ -296,4 +313,3 @@ end
 save([targetFolder 'eyeData.mat'],'eyeData','-v7.3');             
 save([targetFolder 'eyeDataPerTrial.mat'],'eyeDataPerTrial','-v7.3');
 
-end

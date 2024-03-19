@@ -1,12 +1,11 @@
-function screenFiles
-% This script performs quality checks to determine whether recordings sites
+% This script performs quality checks to determine whether recording sites
 % should be included and counts number trials that were included or
-% excluded. Additionally, signals for figures 2 and 3 are generated
+% excluded. Additionally, example signals for figures 2 and 3 are generated
 %
 % Companion code for:
 %
 % N-methyl d-aspartate receptor hypofunction reduces steady state visual
-% evoked potentials (2023)
+% evoked potentials (2024)
 % Alexander Schielke & Bart Krekelberg
 % Center for Molecular and Behavioral Neuroscience
 % Rutgers University - Newark 
@@ -17,7 +16,7 @@ targetFolder = strrep(pwd,'code','data\processed\');
 resultsFolder = strrep(pwd,'code','data\results\');
 
 %do the outputFolders exist 
-%(this should be the case for anybody the data are shared with)
+%(this should be the case once the code has been run a least once)
 if ~exist(targetFolder,'dir')
     mkdir([targetFolder 'processed\']);
 end 
@@ -29,7 +28,7 @@ end
 fileNames = dir(sourceFolder);
 fileNames = {fileNames.name};
 fileNames(1:2) = [];
-time = -800:2600;
+time = -800:2600; %trial duration with stimulus onset at 0
 %by file
 totalElectrodeCntr = 0;
 for fileCntr = 1:length(fileNames)
@@ -40,7 +39,7 @@ for fileCntr = 1:length(fileNames)
     fileName = strrep(fileNames{fileCntr},'.mat','');
     fileName = str2double(fileName(5:end));
 
-%where 
+
     for electrodeCntr = 1:size(tempFile.lfp.signal{1},3)
         totalElectrodeCntr = totalElectrodeCntr+1;
 
@@ -48,22 +47,26 @@ for fileCntr = 1:length(fileNames)
         %   -blinks
         %   -missing data
         %   -artifacts
+        %   -baseline artifacts
         eyeClosedSaline = tempFile.lfp.trialInfo.outlierInfo{1}.electrode(electrodeCntr).eyesClosed;
         nanTrialsSaline = tempFile.lfp.trialInfo.outlierInfo{1}.electrode(electrodeCntr).nanTrials;
         artifactsSaline = tempFile.lfp.trialInfo.outlierInfo{1}.electrode(electrodeCntr).artifact;
+        baselineArtifactsSaline = detectOutliers(tempFile.lfp.signal{1}(time>=-800 & time<0,:,electrodeCntr),4)';
+
         eyeClosedKetamine = tempFile.lfp.trialInfo.outlierInfo{2}.electrode(electrodeCntr).eyesClosed;
         nanTrialsKetamine = tempFile.lfp.trialInfo.outlierInfo{2}.electrode(electrodeCntr).nanTrials;
         artifactsKetamine = tempFile.lfp.trialInfo.outlierInfo{2}.electrode(electrodeCntr).artifact;
+        baselineArtifactsKetamine = detectOutliers(tempFile.lfp.signal{2}(time>=-800 & time<0,:,electrodeCntr),4)';
 
         uEyeClosedSaline = eyeClosedSaline;
         uNanTrialsSaline = nanTrialsSaline;
         uNanTrialsSaline(uEyeClosedSaline) = 0;
-        uArtifactsSaline = artifactsSaline;
+        uArtifactsSaline = (artifactsSaline + baselineArtifactsSaline)>0;
         uArtifactsSaline(uEyeClosedSaline | uNanTrialsSaline) = 0;
         uEyeClosedKetamine = eyeClosedKetamine;
         uNanTrialsKetamine = nanTrialsKetamine;
         uNanTrialsKetamine(uEyeClosedKetamine) = 0;
-        uArtifactsKetamine = artifactsKetamine;
+        uArtifactsKetamine = (artifactsKetamine + baselineArtifactsKetamine)>0;
         uArtifactsKetamine(uEyeClosedKetamine | uNanTrialsKetamine) = 0;
 
     	%trials that do not contains artifacts, nans or blinks 
@@ -90,6 +93,10 @@ for fileCntr = 1:length(fileNames)
         useInfo.subject(totalElectrodeCntr,:) = tempFile.subject;
         useInfo.session(totalElectrodeCntr) = fileName;
         useInfo.electrode(totalElectrodeCntr) = electrodeCntr;
+
+        
+        useInfo.noEyeData.saline(totalElectrodeCntr) = size(tempFile.eye.signal{1},1)==1;
+        useInfo.noEyeData.ketamine(totalElectrodeCntr) = size(tempFile.eye.signal{2},1)==1;
 
         useInfo.rejectedTrials.saline.nrFixationBreakTrials(totalElectrodeCntr,1) = sum(uEyeClosedSaline(subselectionSaline));
         useInfo.rejectedTrials.saline.nrNaNTrials(totalElectrodeCntr,1) = sum(uNanTrialsSaline(subselectionSaline));
@@ -119,19 +126,19 @@ for fileCntr = 1:length(fileNames)
             useInfo.rejectedTrials.ketamine.sufficientTrials(totalElectrodeCntr,conditionCntr) = sum(useInfo.trialSelection.ketamine{totalElectrodeCntr,conditionCntr+1})>=20;
 
 
-            %calculate SNR by using only first 60 minutes
+            %calculate Onset Response Ratio (ORR) by using only first 60 minutes
             tempMeanSal = mean(tempFile.lfp.signal{1}(:,allIncludedTrialsSaline & conditionsSaline==uCond(conditionCntr),electrodeCntr),2,'omitnan');
             baselineStd = std(abs(tempMeanSal(time>=-500 & time<0)));
             onsetMean = mean(abs(tempMeanSal(time>=51 & time<=250)));
-            onsetSNR = (onsetMean)/baselineStd;
-            useInfo.snr.saline(totalElectrodeCntr,conditionCntr) = onsetSNR;
+            onsetResponseRatio = (onsetMean)/baselineStd;
+            useInfo.snr.saline(totalElectrodeCntr,conditionCntr) = onsetResponseRatio;
             averageSignal.saline(:,conditionCntr,totalElectrodeCntr) = tempMeanSal;
 
             tempMeanKet = mean(tempFile.lfp.signal{2}(:,allIncludedTrialsKetamine & conditionsKetamine==uCond(conditionCntr),electrodeCntr),2,'omitnan');
             baselineStd = std(abs(tempMeanKet(time>=-500 & time<0)));
             onsetMean = mean(abs(tempMeanKet(time>=51 & time<=250)));
-            onsetSNR = (onsetMean)/baselineStd;
-            useInfo.snr.ketamine(totalElectrodeCntr,conditionCntr) = onsetSNR;
+            onsetResponseRatio = (onsetMean)/baselineStd;
+            useInfo.snr.ketamine(totalElectrodeCntr,conditionCntr) = onsetResponseRatio;
             averageSignal.ketamine(:,conditionCntr,totalElectrodeCntr) = tempMeanKet;
 
             %use only first 60 minutes to calculate zScored signal
@@ -161,16 +168,25 @@ rejectInfo.snr.both = useInfo.snr.ketamine(:,1)<2.5 & useInfo.snr.saline(:,1)<2.
 rejectInfo.insufficientTrials.saline = (useInfo.rejectedTrials.ketamine.sufficientTrials-useInfo.rejectedTrials.saline.sufficientTrials)==1;
 rejectInfo.insufficientTrials.saline(useInfo.snr.saline(:,1)<2.5 | useInfo.snr.ketamine(:,1)<2.5,:) = 0;    %do not count electrodes that have already been excluded
 rejectInfo.insufficientTrials.ketamine = (useInfo.rejectedTrials.ketamine.sufficientTrials-useInfo.rejectedTrials.saline.sufficientTrials)==-1;
-rejectInfo.insufficientTrials.ketamine(useInfo.snr.saline(:,1)<2.5 | useInfo.snr.ketamine(:,1)<2.5,:) = 0;
+rejectInfo.insufficientTrials.ketamine(useInfo.snr.saline(:,1)<2.5 | useInfo.snr.ketamine(:,1)<2.5,:) = 0;  %do not count electrodes that have already been excluded
 rejectInfo.insufficientTrials.both = (useInfo.rejectedTrials.saline.sufficientTrials+ useInfo.rejectedTrials.ketamine.sufficientTrials)==0;
-rejectInfo.insufficientTrials.both(useInfo.snr.saline(:,1)<2.5 & useInfo.snr.ketamine(:,1)<2.5,:) = 0;
+rejectInfo.insufficientTrials.both(useInfo.snr.saline(:,1)<2.5 & useInfo.snr.ketamine(:,1)<2.5,:) = 0;      %do not count electrodes that have already been excluded
+
+%how many electrodes that were not excluded so far were rejected because we
+%do not have pupil data available
+rejectInfo.noEye = (useInfo.noEyeData.ketamine | useInfo.noEyeData.saline)'; %both are actually the same anyway
+rejectInfo.noEye(useInfo.snr.saline(:,1)<2.5 | useInfo.snr.ketamine(:,1)<2.5) = 0;
+rejectInfo.noEye = repmat(rejectInfo.noEye,[1,5]);
+
+rejectInfo.noEye(rejectInfo.insufficientTrials.saline | rejectInfo.insufficientTrials.ketamine | rejectInfo.insufficientTrials.both) = 0;
 
 
 %combining information about electrodes that had sufficients trials and a
-%good SNR provides the  inclusion critereon we will use for all further
-%analyses for this study
+%good ORR in the 0 Hz condition provides the  inclusion critereon we will 
+% use for all further analyses for this study
 useInfo.doUse = useInfo.snr.saline(:,1)>=2.5 & useInfo.snr.ketamine(:,1)>=2.5 & ...     %electrodes with an snr of at least 2.5
-                useInfo.rejectedTrials.saline.sufficientTrials & useInfo.rejectedTrials.ketamine.sufficientTrials;%electrodes with at least 20 trials are included
+                useInfo.rejectedTrials.saline.sufficientTrials & useInfo.rejectedTrials.ketamine.sufficientTrials & ...
+                ~rejectInfo.noEye;%electrodes with at least 20 trials are included
 
 
 %of the included electrodes, what is the number trials that were rejected
@@ -197,7 +213,7 @@ useInfo.doUse = useInfo.snr.saline(:,1)>=2.5 & useInfo.snr.ketamine(:,1)>=2.5 & 
     rejectedTrials.combined.acrossConditions.blinks.std = std([useInfo.rejectedTrials.saline.nrFixationBreakTrials(useInfo.doUse); useInfo.rejectedTrials.ketamine.nrFixationBreakTrials(useInfo.doUse)]);
     rejectedTrials.combined.acrossConditions.blinks.range = [min([useInfo.rejectedTrials.saline.nrFixationBreakTrials(useInfo.doUse); useInfo.rejectedTrials.ketamine.nrFixationBreakTrials(useInfo.doUse)]) max([useInfo.rejectedTrials.saline.nrFixationBreakTrials(useInfo.doUse); useInfo.rejectedTrials.ketamine.nrFixationBreakTrials(useInfo.doUse)])];
     
-    % -because a trial had missing data n the recording of local field
+    % -because a trial had missing data in the recording of local field
     % potentials (this has apparently not happened)
   	for conditionCntr = 2:size(useInfo.rejectedTrials.saline.nrFixationBreakTrials,2)
         rejectedTrials.saline.perCondition.nans.mean(conditionCntr-1) = mean(useInfo.rejectedTrials.saline.nrNaNTrials(useInfo.doUse(:,conditionCntr-1),conditionCntr));
@@ -246,6 +262,8 @@ useInfo.doUse = useInfo.snr.saline(:,1)>=2.5 & useInfo.snr.ketamine(:,1)>=2.5 & 
    
     
 %how many trials did each electrode we included supply
+nrTrialsIncludedSaline = nan(size(useInfo.trialSelection.saline,1),size(useInfo.trialSelection.saline,1)-1);
+nrTrialsIncludedKetamine = nan(size(useInfo.trialSelection.saline,1),size(useInfo.trialSelection.saline,1)-1);
 for conditionCntr =  2:size(useInfo.trialSelection.saline,2)
     for electrodeCntr = 1:size(useInfo.trialSelection.saline,1)
         nrTrialsIncludedSaline(electrodeCntr,conditionCntr-1) = sum(useInfo.trialSelection.saline{electrodeCntr,conditionCntr});
@@ -296,6 +314,9 @@ includedTrials.combined.acrossConditions.range = [min(nrTrialsIncludedCombined(:
     electrodesRemovedForTrialCount.total(:,1) = electrodesRemovedForTrialCount.saline+electrodesRemovedForTrialCount.ketamine+electrodesRemovedForTrialCount.both;
     electrodesRemovedForTrialCount.unique(:,1) = [sum((sum(rejectInfo.insufficientTrials.saline,2) + sum(rejectInfo.insufficientTrials.ketamine,2))>0) NaN NaN NaN NaN];
     
+    electrodesRemovedForNoEye.total = sum(rejectInfo.noEye)'; %both the same anyway
+
+
     %how many electrodes were ultimately included
     electrodesIncluded.totalIncluded(:,1) = sum(useInfo.doUse);
     electrodesIncluded.totalExcluded(:,1) = sum(~useInfo.doUse);
@@ -400,6 +421,10 @@ writetable(electrodesRemovedForLowSNR,[resultsFolder 'electrodesRemovedForLowSNR
 electrodesRemovedForTrialCount = struct2table(electrodesRemovedForTrialCount);
 electrodesRemovedForTrialCount.Properties.RowNames = conditionNames(1:5);
 writetable(electrodesRemovedForTrialCount,[resultsFolder 'electrodesRemovedForTrialCount' '.csv'],'WriteRowNames',true);
+electrodesRemovedForNoEye = struct2table(electrodesRemovedForNoEye);
+electrodesRemovedForNoEye.Properties.RowNames = conditionNames(1:5);
+writetable(electrodesRemovedForNoEye,[resultsFolder 'electrodesRemovedForNoEye' '.csv'],'WriteRowNames',true);
+
 electrodesIncluded = struct2table(electrodesIncluded);
 electrodesIncluded.Properties.RowNames = conditionNames(1:5);
 writetable(electrodesIncluded,[resultsFolder 'electrodesIncluded' '.csv'],'WriteRowNames',true);
@@ -424,5 +449,29 @@ writetable(testNrTrialsIncluded,[resultsFolder 'testNrTrialsIncluded' '.csv'],'W
 save([targetFolder 'useInfo'], 'useInfo','-v7.3');
 save([targetFolder 'averageSignal'], 'averageSignal','-v7.3');
 save([targetFolder 'zScoredSignal'], 'zScoredSignal','-v7.3');
+
+
+
+
+function outliers = detectOutliers(inputSignal,threshold)
+
+
+    outliers = nan(size(inputSignal,2),size(inputSignal,3));
+    for electrodeCntr = 1:size(inputSignal,3)
+        minMaxTrial =zeros(1,size(inputSignal,2));
+        
+        %find outliers
+        workSet = squeeze(inputSignal(:,:,electrodeCntr));
+
+        for trialCntr = 1:size(workSet,2)
+            minMaxTrial(trialCntr) = diff([min(workSet(:,trialCntr)) max(workSet(:,trialCntr))]);
+        end
+    	lb = median(minMaxTrial)-threshold*iqr(minMaxTrial);
+      	ub = median(minMaxTrial)+threshold*iqr(minMaxTrial);
+        badTrialLB = minMaxTrial<lb;
+        badTrialUB = minMaxTrial>ub;
+
+        outliers(:,electrodeCntr) = (badTrialLB + badTrialUB) >0;
+    end
 
 end

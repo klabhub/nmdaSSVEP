@@ -1,11 +1,10 @@
-function combineFiles
 % This script matches lfp recordings and eyelink edf files for each
-% recording day and recording pair (respective saline and ketamine pair)
+% recording day and recording pair (respective saline and ketamine sessions)
 %
 % Companion code for:
 %
 % N-methyl d-aspartate receptor hypofunction reduces steady state visual
-% evoked potentials (2023)
+% evoked potentials (2024)
 % Alexander Schielke & Bart Krekelberg
 % Center for Molecular and Behavioral Neuroscience
 % Rutgers University - Newark 
@@ -21,8 +20,8 @@ eyeFiles = dir(eyeFolder);
 eyeFiles = {eyeFiles.name};
 eyeFiles(1:2) = [];
 
-%does the outputFolder exist 
-%(this should be the case for anybody the data are shared with)
+%do the outputFolders exist 
+%(this should be the case once the code has been run a least once)
 if ~exist([sourceFolder 'combined\'],'dir')
     mkdir([sourceFolder 'combined\']);
 end 
@@ -61,7 +60,7 @@ for fileCntr = 1:length(eyeFiles)
     edfFileNames.ketamine(fileCntr,:) = edfFileNameKetamineTemp; 
 end
 
-%match files
+%match files with lfp data and eyelink data
 eyeFileIdx = nan(size(lfpFileNames.saline,1),1);
 edfFileMatch = nan(size(lfpFileNames.saline,1),2);
 for fileCntr = 1:size(lfpFileNames.saline,1)
@@ -77,7 +76,7 @@ for fileCntr = 1:size(lfpFileNames.saline,1)
 end
 
 
-%combineFiles
+%combineFiles with lfp data and eyelink data
 for fileCntr = 1:length(lfpFiles)
     clearvars data
     
@@ -87,7 +86,7 @@ for fileCntr = 1:length(lfpFiles)
     %create files
     data.subject = tempLfpFile.partnerFile.salineFile(1:2);
     data.date = tempLfpFile.partnerFile.partnerDayDir;
-    data.startDelay = tempLfpFile.partnerFile.startDelay;
+    data.startDelay = tempLfpFile.partnerFile.startDelay;   %time between injection and start of experiment
     
     data.lfp.signal = tempLfpFile.signal;
     data.lfp.trialInfo =  tempLfpFile.trialInfo;
@@ -108,7 +107,11 @@ for fileCntr = 1:length(lfpFiles)
         data.eye.trialInfo = [];
     end
         
-    save([sourceFolder 'combined\file' num2str(fileCntr)], 'data','-v7.3');
-end
-
+    %files below 10 should have a 0 in front of them, so that later
+    %matching in 'useInfo.mat' (generated in 'screenFiles.m' stays consistent)
+    if length(num2str(fileCntr))<2
+        save([sourceFolder 'combined\file0' num2str(fileCntr)], 'data','-v7.3');
+    else
+        save([sourceFolder 'combined\file' num2str(fileCntr)], 'data','-v7.3');
+    end
 end
